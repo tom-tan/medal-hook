@@ -1,0 +1,20 @@
+{
+	"authors": [
+		"Tomoya Tanjo"
+	],
+	"copyright": "© 2021 Tomoya Tanjo",
+	"description": "A helper tool for medal that adds new features to medal",
+	"license": "Apache-2.0",
+	"name": "medal-hook",
+	"targetType": "executable",
+	"targetPath": "bin",
+	"dependencies": {
+		"dyaml": "~>0.8.3"
+	},
+	"buildTypes": {
+		"release-static": {
+			"buildOptions": ["releaseMode", "optimize", "inline"],
+			"dflags-posix-ldc": ["-static"]
+		}
+	}
+}

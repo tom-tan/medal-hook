@@ -1,0 +1,8 @@
+id: example-replace-env
+hooks:
+  - target: echo-env
+    operations:
+      - type: replace-env
+        env:
+          - name: MESSAGE
+            value: Good morning
