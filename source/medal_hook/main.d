@@ -126,19 +126,32 @@ auto applyOperation(ref Node base, Node op)
         }
         else
         {
+            // limitation: does not support to add them to `on` transitions
             auto rng = base["transitions"].sequence
                                           .find!(t => t["name"] == op["target"]);
             if (rng.empty)
             {
                 throw new Exception("No such transition: "~op["target"].get!string);
             }
-            // limitation: does not support to add them to `on` transitions
             auto current = rng.front["out"].sequence.array;
             auto added = op["out"].sequence.array;
             rng.front["out"] = Node(current~added);
         }
         break;
     case "insert-before":
+        enforce(base["type"] == "network");
+        auto trs = base["transitions"];
+        auto rng = trs.sequence
+                      .find!(t => t["name"] == op["target"]);
+        if (rng.empty)
+        {
+            throw new Exception("No such transition: "~op["target"].get!string);
+        }
+        auto target = rng.front;
+        target["in"] = op["in"]; // TODO: easier representation
+        auto curTrs = trs.sequence.array;
+        auto inserted = op["transitions"].sequence.array;
+        base["transitions"] = Node(curTrs~inserted);
         break;
     default:
         throw new Exception("Unsupported hook type: "~type);
