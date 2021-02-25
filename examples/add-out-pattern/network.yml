@@ -1,0 +1,28 @@
+name: add-out-pattern-network
+application: hello-sleep
+type: network
+in:
+  - place: foo
+    pattern: 0
+out:
+  - place: foo
+    pattern: exit
+on:
+  exit:
+    - name: sleep
+      type: shell
+      in:
+        - place: bar0
+          pattern: exit
+      command: echo "Good night, world!"
+transitions:
+  - name: hello0
+    type: invocation
+    in:
+      - place: foo
+        pattern: 0
+        port-to: foo
+    out:
+      - place: foo
+        port-to: foo
+    use: subnetwork.yml

@@ -1,0 +1,9 @@
+id: example-add-out-pattern
+hooks:
+  - target: hello-sleep
+    operations:
+      - type: add-out
+        target: "/^hello(.+)$/"
+        out:
+          - place: bar
+            port-to: "bar~1"

@@ -63,7 +63,7 @@ auto apply(ref Node base, Node hook)
     return result;
 }
 
-auto applyOperation(ref Node base, Node op)
+Node applyOperation(ref Node base, Node op)
 {
     auto type = op["type"].get!string;
     switch(type)
@@ -117,7 +117,35 @@ auto applyOperation(ref Node base, Node op)
         break;
     case "add-out":
         enforce(base["type"] == "network");
-        if (base["name"] == op["target"])
+        auto target = op["target"].get!string;
+        if (target.startsWith("/") && target.endsWith("/"))
+        {
+            auto extractPattern(Node baseOp, Captures!string c)
+            {
+                Node ret;
+                ret.add("type", Node("add-out"));
+                ret["target"] = Node(c.hit);
+                auto cap = c[1];
+                ret["out"] = Node(baseOp["out"].sequence
+                                           .map!((o) {
+                                               Node newOut;
+                                               newOut.add("place", o["place"]);
+                                               newOut["port-to"] = o["port-to"].get!string.replace("~1", cap);
+                                               return newOut;
+                                           })
+                                           .array);
+                return ret;
+            }
+            auto r = regex(target[1..$-1]);
+            auto trs = base["transitions"].sequence;
+            foreach(t; trs.find!(t => t["name"].get!string.matchFirst(r)))
+            {
+                auto cap = t["name"].get!string.matchFirst(r);
+                auto extractedOp = extractPattern(op, cap);
+                applyOperation(base, extractedOp);
+            }
+        }
+        else if (base["name"] == target)
         {
             auto current = base["out"].sequence.array;
             auto added = op["out"].sequence.array;
@@ -128,10 +156,10 @@ auto applyOperation(ref Node base, Node op)
         {
             // limitation: does not support to add them to `on` transitions
             auto rng = base["transitions"].sequence
-                                          .find!(t => t["name"] == op["target"]);
+                                          .find!(t => t["name"] == target);
             if (rng.empty)
             {
-                throw new Exception("No such transition: "~op["target"].get!string);
+                throw new Exception("No such transition: "~target);
             }
             auto current = rng.front["out"].sequence.array;
             auto added = op["out"].sequence.array;

@@ -1,0 +1,23 @@
+name: hello-world
+application: sub-hello
+type: network
+in:
+  - place: foo
+    pattern: 0
+out:
+  - place: foo
+    pattern: exit
+  - place: bar
+    pattern: exit
+transitions:
+  - name: hello
+    type: shell
+    in:
+      - place: foo
+        pattern: 0
+    out:
+      - place: foo
+        pattern: exit
+      - place: bar
+        pattern: exit
+    command: echo "Hello, world!"
