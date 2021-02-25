@@ -15,7 +15,7 @@ int medalHookMain(string[] args)
 
     auto helpInfo = args.getopt(
         config.caseSensitive,
-        "hook", "Specify ahook file", &hookFiles,
+        "hook", "Specify a hook file", &hookFiles,
     );
 
     if (helpInfo.helpWanted || args.length != 2)
@@ -65,9 +65,11 @@ auto apply(ref Node base, Node hook)
 
 auto applyOperation(ref Node base, Node op)
 {
-    switch(op["type"].get!string)
+    auto type = op["type"].get!string;
+    switch(type)
     {
     case "replace-env":
+        enforce(base["type"] == "network");
         auto oldEnv = base["configuration"]["env"].sequence.array;
         auto newEnv = op["env"].sequence.array;
         auto resultedEnv = chain(newEnv, oldEnv).schwartzSort!(`a["name"].get!string`, "a < b", SwapStrategy.stable)
@@ -75,8 +77,71 @@ auto applyOperation(ref Node base, Node op)
                                                 .array;
         base["configuration"]["env"] = Node(resultedEnv);
         break;
-    default:
+    case "add-transitions":
+        enforce(base["type"] == "network");
+        if (auto trs = "transitions" in op)
+        {
+            auto curTrs = "transitions" in base ? base["transitions"].sequence.array : [];
+            auto newTrs = trs.sequence.array;
+            base["transitions"] = Node(curTrs~newTrs);
+        }
+        if (auto on = true in op)
+        {
+            if (auto bon_ = true in base)
+            {
+                auto bon = *bon_;
+                if (auto suc = "success" in *on)
+                {
+                    auto curTrs = "success" in bon ? bon["success"].sequence.array : [];
+                    auto newTrs = suc.sequence.array;
+                    bon["success"] = Node(curTrs~newTrs);
+                }
+                if (auto fail = "failure" in *on)
+                {
+                    auto curTrs = "failure" in bon ? bon["failure"].sequence.array : [];
+                    auto newTrs = fail.sequence.array;
+                    bon["failure"] = Node(curTrs~newTrs);
+                }
+                if (auto ex = "exit" in *on)
+                {
+                    auto curTrs = "exit" in bon ? bon["exit"].sequence.array : [];
+                    auto newTrs = ex.sequence.array;
+                    bon["exit"] = Node(curTrs~newTrs);
+                }
+            }
+            else
+            {
+                base["on"] = *on;
+            }
+        }
         break;
+    case "add-out":
+        enforce(base["type"] == "network");
+        if (base["name"] == op["target"])
+        {
+            auto current = base["out"].sequence.array;
+            auto added = op["out"].sequence.array;
+            // TODO: should not be overwrapped
+            base["out"] = Node(current~added);
+        }
+        else
+        {
+            auto rng = base["transitions"].sequence
+                                          .find!(t => t["name"] == op["target"]);
+            if (rng.empty)
+            {
+                throw new Exception("No such transition: "~op["target"].get!string);
+            }
+            // limitation: does not support to add them to `on` transitions
+            auto current = rng.front["out"].sequence.array;
+            auto added = op["out"].sequence.array;
+            rng.front["out"] = Node(current~added);
+        }
+        break;
+    case "insert-before":
+        break;
+    default:
+        throw new Exception("Unsupported hook type: "~type);
     }
     return base;
 }
