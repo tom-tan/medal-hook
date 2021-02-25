@@ -1,0 +1,9 @@
+id: example-add-out-root
+hooks:
+  - target: hello
+    operations:
+      - type: add-out
+        target: add-out-root-network
+        out:
+          - place: bar
+            pattern: exit

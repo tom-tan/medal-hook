@@ -1,0 +1,13 @@
+id: example-add-transitions-exit
+hooks:
+  - target: hello
+    operations:
+      - type: add-transitions
+        on:
+          exit:
+            - name: sleep
+              type: shell
+              in:
+                - place: bar
+                  pattern: _
+              command: echo "Good night, world!"

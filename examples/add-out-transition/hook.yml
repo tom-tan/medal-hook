@@ -1,0 +1,16 @@
+id: example-add-out-transition
+hooks:
+  - target: sub-hello
+    operations:
+      - type: add-out
+        target: hello-world
+        out:
+          - place: bar
+            pattern: exit
+  - target: hello-sleep
+    operations:
+      - type: add-out
+        target: hello
+        out:
+          - place: bar
+            port-to: bar
