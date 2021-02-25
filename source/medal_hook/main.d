@@ -111,7 +111,7 @@ auto applyOperation(ref Node base, Node op)
             }
             else
             {
-                base["on"] = *on;
+                base[true] = *on;
             }
         }
         break;
