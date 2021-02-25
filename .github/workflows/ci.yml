@@ -45,6 +45,12 @@ jobs:
           compiler: ${{ matrix.dc }}
       - name: Run tests
         run: dub -q test
+      - name: Install medal
+        run: |
+          curl -SL https://github.com/tom-tan/medal/releases/download/${medal_ver}/medal-linux-x86_64.tar.gz \
+              | sudo tar xC /usr/bin
+        env:
+          medal_ver: v0.4.0
       - name: Run examples
         run: ./test_examples.sh
 
