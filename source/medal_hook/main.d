@@ -60,6 +60,14 @@ auto apply(ref Node base, Node hook)
     if (hs.empty) return base;
     auto h = hs.front;
     auto result = h["operations"].sequence.fold!applyOperation(base);
+    if (auto ah = "applied-hooks" in result)
+    {
+        ah.add(hook["id"]);
+    }
+    else
+    {
+        result.add("applied-hooks", Node([hook["id"]]));
+    }
     return result;
 }
 
