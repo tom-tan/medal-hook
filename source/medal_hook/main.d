@@ -56,7 +56,7 @@ auto apply(ref Node base, Node hook)
 {
     auto app = enforce("application" in base).get!string;
     auto hooks = enforce("hooks" in hook);
-    auto hs = hooks.sequence.find!(h => h["target"].get!string == app);
+    auto hs = hooks.sequence.filter!(h => h["target"].get!string == app);
     if (hs.empty) return base;
     auto h = hs.front;
     auto result = h["operations"].sequence.fold!applyOperation(base);
@@ -82,7 +82,7 @@ Node applyOperation(ref Node base, Node op)
         if (auto trs = "transitions" in op)
         {
             auto curTrs = "transitions" in base ? base["transitions"].sequence.array : [];
-            auto newTrs = trs.sequence.array;
+            auto newTrs = trs.sequence.map!(t => t.extractTransition(base)).array;
             base["transitions"] = Node(curTrs~newTrs);
         }
         if (auto on = true in op)
@@ -93,19 +93,19 @@ Node applyOperation(ref Node base, Node op)
                 if (auto suc = "success" in *on)
                 {
                     auto curTrs = "success" in bon ? bon["success"].sequence.array : [];
-                    auto newTrs = suc.sequence.array;
+                    auto newTrs = suc.sequence.map!(t => t.extractTransition(base)).array;
                     bon["success"] = Node(curTrs~newTrs);
                 }
                 if (auto fail = "failure" in *on)
                 {
                     auto curTrs = "failure" in bon ? bon["failure"].sequence.array : [];
-                    auto newTrs = fail.sequence.array;
+                    auto newTrs = fail.sequence.map!(t => t.extractTransition(base)).array;
                     bon["failure"] = Node(curTrs~newTrs);
                 }
                 if (auto ex = "exit" in *on)
                 {
                     auto curTrs = "exit" in bon ? bon["exit"].sequence.array : [];
-                    auto newTrs = ex.sequence.array;
+                    auto newTrs = ex.sequence.map!(t => t.extractTransition(base)).array;
                     bon["exit"] = Node(curTrs~newTrs);
                 }
             }
@@ -136,11 +136,11 @@ Node applyOperation(ref Node base, Node op)
                                            .array);
                 return ret;
             }
-            auto r = regex(target[1..$-1]);
+            auto re = regex(target[1..$-1]);
             auto trs = base["transitions"].sequence;
-            foreach(t; trs.find!(t => t["name"].get!string.matchFirst(r)))
+            foreach(t; trs.filter!(t => t["name"].get!string.matchFirst(re)))
             {
-                auto cap = t["name"].get!string.matchFirst(r);
+                auto cap = t["name"].get!string.matchFirst(re);
                 auto extractedOp = extractPattern(op, cap);
                 applyOperation(base, extractedOp);
             }
@@ -156,7 +156,7 @@ Node applyOperation(ref Node base, Node op)
         {
             // limitation: does not support to add them to `on` transitions
             auto rng = base["transitions"].sequence
-                                          .find!(t => t["name"] == target);
+                                          .filter!(t => t["name"] == target);
             if (rng.empty)
             {
                 throw new Exception("No such transition: "~target);
@@ -170,7 +170,7 @@ Node applyOperation(ref Node base, Node op)
         enforce(base["type"] == "network");
         auto trs = base["transitions"];
         auto rng = trs.sequence
-                      .find!(t => t["name"] == op["target"]);
+                      .filter!(t => t["name"] == op["target"]);
         if (rng.empty)
         {
             throw new Exception("No such transition: "~op["target"].get!string);
@@ -185,4 +185,115 @@ Node applyOperation(ref Node base, Node op)
         throw new Exception("Unsupported hook type: "~type);
     }
     return base;
+}
+
+Node extractTransition(Node node, Node base)
+{
+    enforce(base["type"] == "network");
+    if (node["type"] != "shell")
+    {
+        return node;
+    }
+    Node newIn;
+    foreach(inp; node["in"].sequence)
+    {
+        auto pl = inp["place"].get!string;
+        if (pl.startsWith("/") && pl.endsWith("/"))
+        {
+            auto re = regex(pl[1..$-1]);
+            enumeratePlaces(base)
+                .filter!(p => p.matchFirst(re))
+                .map!((p) {
+                    Node n;
+                    n.add("place", p);
+                    n.add("pattern", inp["pattern"]);
+                    return n;
+                })
+                .each!(n => newIn.add(n));
+        }
+        else
+        {
+            newIn.add(inp);
+        }
+    }
+    auto pls = newIn.sequence
+                    .map!(i => format!"~(%s)"(i["place"].get!string))
+                    .array;
+    auto cmd = node["command"].get!string.replace("~@", pls.joiner(" ").array);
+    Node ret;
+    ret.add("name", node["name"]);
+    ret.add("type", "shell");
+    ret.add("in", newIn);
+    if (auto o = "out" in node)
+    {
+        ret.add("out", *o);
+    }
+    ret.add("command", cmd);
+    return ret;
+}
+
+auto enumerateTransitions(Node n)
+{
+    enforce(n["type"] == "network");
+    return chain(n.dig(["transitions"],   []).sequence,
+                 n.dig(["on", "success"], []).sequence,
+                 n.dig(["on", "failure"], []).sequence,
+                 n.dig(["on", "exit"],    []).sequence).array;
+}
+
+auto enumeratePlaces(Node node)
+{
+    auto places(Node n)
+    {
+        if (n["type"] == "invocation")
+        {
+            auto inp = n.dig(["in"], [])
+                        .sequence
+                        .map!(n => n["place"].get!string)
+                        .array;
+            auto outs = n.dig(["out"], [])
+                         .sequence
+                         .map!(n => n["port-to"].get!string)
+                         .array;
+            return inp~outs;
+
+        }
+        else
+        {
+            return chain(n.dig(["in"], []).sequence,
+                         n.dig(["out"], []).sequence)
+                    .map!(n => n["place"].get!string)
+                    .array;
+        }
+    }
+    auto arr =  enumerateTransitions(node)
+                    .map!(n => places(n))
+                    .joiner
+                    .array;
+    return arr.sort.uniq.array;
+}
+
+auto dig(T)(Node node, string[] keys, T default_)
+{
+    Node ret = node;
+    foreach(k_; keys)
+    {
+        auto k = k_ == "true" ? "on" : k_;
+        if (auto n = k in ret)
+        {
+            ret = *n;
+        }
+        else
+        {
+            static if (is(T : void[]))
+            {
+                return Node((Node[]).init);
+            }
+            else
+            {
+                return Node(default_);
+            }
+        }
+    }
+    return ret;
 }
