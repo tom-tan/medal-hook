@@ -222,6 +222,7 @@ Node[] expandTransition(Node node, Node base)
 
     Node[] nonExpandedIn;
     Node[] expandedIn;
+    auto isExpandPattern = false;
     auto isGlobalPattern = false;
     Captures!string[] caps;
     foreach(inp; node["in"].sequence)
@@ -229,7 +230,8 @@ Node[] expandTransition(Node node, Node base)
         auto pl = inp["place"].get!string;
         if (pl.isRegexPattern)
         {
-            enforce(expandedIn.empty, "Only one regex pattern is allowed");
+            enforce(!isExpandPattern, "Only one regex pattern is allowed");
+            isExpandPattern = true;
             isGlobalPattern = pl.endsWith("g");
             auto end = isGlobalPattern ? pl.length-2 : pl.length-1;
             auto re = regex(pl[1..end]);
@@ -249,7 +251,11 @@ Node[] expandTransition(Node node, Node base)
         }
     }
 
-    if (isGlobalPattern)
+    if (!isExpandPattern)
+    {
+        return [node];
+    }
+    else if (isGlobalPattern)
     {
         auto pls = expandedIn.map!(i => format!"~(%s)"(i["place"].get!string))
                              .array;
