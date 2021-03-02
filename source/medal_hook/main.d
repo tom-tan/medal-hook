@@ -71,7 +71,7 @@ auto apply(ref Node base, Node hook)
     return result;
 }
 
-Node applyOperation(ref Node base, Node op)
+Node applyOperation(Node base, Node op)
 {
     auto type = op["type"].get!string;
     switch(type)
@@ -84,14 +84,18 @@ Node applyOperation(ref Node base, Node op)
                                                 .uniq!`a["name"].get!string == b["name"].get!string`
                                                 .array;
         base["configuration"]["env"] = Node(resultedEnv);
-        break;
+        return base;
     case "add-transitions":
         enforce(base["type"] == "network");
         if (auto trs = "transitions" in op)
         {
-            auto curTrs = "transitions" in base ? base["transitions"].sequence.array : [];
-            auto newTrs = trs.sequence.map!(t => t.extractTransition(base)).array;
-            base["transitions"] = Node(curTrs~newTrs);
+            trs.sequence.each!((t) {
+                if ("transitions" !in base)
+                {
+                    base["transitions"] = Node((Node[]).init);
+                }
+                t.expandTransition(base).each!(tt => base["transitions"].add(tt));
+            });
         }
         if (auto on = true in op)
         {
@@ -100,21 +104,33 @@ Node applyOperation(ref Node base, Node op)
                 auto bon = *bon_;
                 if (auto suc = "success" in *on)
                 {
-                    auto curTrs = "success" in bon ? bon["success"].sequence.array : [];
-                    auto newTrs = suc.sequence.map!(t => t.extractTransition(base)).array;
-                    bon["success"] = Node(curTrs~newTrs);
+                    suc.sequence.each!((t) {
+                        if ("success" !in bon)
+                        {
+                            bon["success"] = Node((Node[]).init);
+                        }
+                        t.expandTransition(base).each!(tt => bon["success"].add(tt));
+                    });
                 }
                 if (auto fail = "failure" in *on)
                 {
-                    auto curTrs = "failure" in bon ? bon["failure"].sequence.array : [];
-                    auto newTrs = fail.sequence.map!(t => t.extractTransition(base)).array;
-                    bon["failure"] = Node(curTrs~newTrs);
+                    fail.sequence.each!((t) {
+                        if ("failure" !in bon)
+                        {
+                            bon["failure"] = Node((Node[]).init);
+                        }
+                        t.expandTransition(base).each!(tt => bon["failure"].add(tt));
+                    });
                 }
                 if (auto ex = "exit" in *on)
                 {
-                    auto curTrs = "exit" in bon ? bon["exit"].sequence.array : [];
-                    auto newTrs = ex.sequence.map!(t => t.extractTransition(base)).array;
-                    bon["exit"] = Node(curTrs~newTrs);
+                    ex.sequence.each!((t) {
+                        if ("exit" !in bon)
+                        {
+                            bon["exit"] = Node((Node[]).init);
+                        }
+                        t.expandTransition(base).each!(tt => bon["exit"].add(tt));
+                    });
                 }
             }
             else
@@ -122,13 +138,14 @@ Node applyOperation(ref Node base, Node op)
                 base[true] = *on;
             }
         }
-        break;
+        return base;
     case "add-out":
         enforce(base["type"] == "network");
         auto target = op["target"].get!string;
-        if (target.startsWith("/") && target.endsWith("/"))
+        if (target.isRegexPattern)
         {
-            auto extractPattern(Node baseOp, Captures!string c)
+            enforce(!target.endsWith("g"));
+            auto expandPattern(Node baseOp, Captures!string c)
             {
                 Node ret;
                 ret.add("type", Node("add-out"));
@@ -149,8 +166,8 @@ Node applyOperation(ref Node base, Node op)
             foreach(t; trs.filter!(t => t["name"].get!string.matchFirst(re)))
             {
                 auto cap = t["name"].get!string.matchFirst(re);
-                auto extractedOp = extractPattern(op, cap);
-                applyOperation(base, extractedOp);
+                auto expandedOp = expandPattern(op, cap);
+                base = applyOperation(base, expandedOp);
             }
         }
         else if (base["name"] == target)
@@ -173,7 +190,7 @@ Node applyOperation(ref Node base, Node op)
             auto added = op["out"].sequence.array;
             rng.front["out"] = Node(current~added);
         }
-        break;
+        return base;
     case "insert-before":
         enforce(base["type"] == "network");
         auto trs = base["transitions"];
@@ -188,56 +205,105 @@ Node applyOperation(ref Node base, Node op)
         auto curTrs = trs.sequence.array;
         auto inserted = op["transitions"].sequence.array;
         base["transitions"] = Node(curTrs~inserted);
-        break;
+        return base;
     default:
         throw new Exception("Unsupported hook type: "~type);
     }
-    return base;
+    assert(false);
 }
 
-Node extractTransition(Node node, Node base)
+Node[] expandTransition(Node node, Node base)
 {
     enforce(base["type"] == "network");
     if (node["type"] != "shell")
     {
-        return node;
+        return [node];
     }
-    Node newIn;
+
+    Node[] nonExpandedIn;
+    Node[] expandedIn;
+    auto isGlobalPattern = false;
+    Captures!string[] caps;
     foreach(inp; node["in"].sequence)
     {
         auto pl = inp["place"].get!string;
-        if (pl.startsWith("/") && pl.endsWith("/"))
+        if (pl.isRegexPattern)
         {
-            auto re = regex(pl[1..$-1]);
+            enforce(expandedIn.empty, "Only one regex pattern is allowed");
+            isGlobalPattern = pl.endsWith("g");
+            auto end = isGlobalPattern ? pl.length-2 : pl.length-1;
+            auto re = regex(pl[1..end]);
             enumeratePlaces(base)
                 .filter!(p => p.matchFirst(re))
-                .map!((p) {
+                .each!((p) {
                     Node n;
                     n.add("place", p);
                     n.add("pattern", inp["pattern"]);
-                    return n;
-                })
-                .each!(n => newIn.add(n));
+                    expandedIn ~= n;
+                    caps ~= p.matchFirst(re);
+                });
         }
         else
         {
-            newIn.add(inp);
+            nonExpandedIn ~= inp;
         }
     }
-    auto pls = newIn.sequence
-                    .map!(i => format!"~(%s)"(i["place"].get!string))
-                    .array;
-    auto cmd = node["command"].get!string.replace("~@", pls.joiner(" ").array);
-    Node ret;
-    ret.add("name", node["name"]);
-    ret.add("type", "shell");
-    ret.add("in", newIn);
-    if (auto o = "out" in node)
+
+    if (isGlobalPattern)
     {
-        ret.add("out", *o);
+        auto pls = expandedIn.map!(i => format!"~(%s)"(i["place"].get!string))
+                             .array;
+        auto cmd = node["command"].get!string.replace("~@", pls.joiner(" ").array);
+        Node ret;
+        ret.add("name", node["name"]);
+        ret.add("type", "shell");
+        ret.add("in", nonExpandedIn~expandedIn);
+        if (auto o = "out" in node)
+        {
+            ret.add("out", *o);
+        }
+        ret.add("command", cmd);
+        return [ret];
     }
-    ret.add("command", cmd);
-    return ret;
+    else
+    {
+        Node[] results;
+        foreach(idx; iota(expandedIn.length))
+        {
+            auto c = caps[idx].array;
+            auto pats = [["~0", format!"~(%s)"(c[0])]];
+            pats ~= enumerate(c[1..$], 1).map!(tpl => [format!"~%s"(tpl.index), tpl.value]).array;
+
+            Node ret;
+            auto name = node["name"].get!string;
+            pats.each!(p => name = name.replace(p[0], p[1]));
+            ret.add("name", name);
+
+            ret.add("type", "shell");
+            ret.add("in", nonExpandedIn~expandedIn[idx]);
+
+
+            auto cmd = node["command"].get!string;
+            pats.each!(p => cmd = cmd.replace(p[0], p[1]));
+            ret.add("command", cmd);
+
+            if (auto o = "out" in node)
+            {
+                auto newOut = o.sequence.map!((oo) {
+                    Node out_;
+                    auto pl = oo["place"].get!string;
+                    pats.each!(p => pl = pl.replace(p[0], p[1]));
+                    out_.add("place", pl);
+                    out_.add("pattern", oo["pattern"]);
+                    return out_;
+                }).array;
+                ret.add("out", Node(newOut));
+            }
+            results ~= ret;
+        }
+        return results;
+    }
+    assert(false);
 }
 
 auto enumerateTransitions(Node n)
@@ -304,4 +370,9 @@ auto dig(T)(Node node, string[] keys, T default_)
         }
     }
     return ret;
+}
+
+auto isRegexPattern(string s) @nogc nothrow pure @safe
+{
+    return s.startsWith("/") && (s.endsWith("/") || s.endsWith("/g"));
 }
