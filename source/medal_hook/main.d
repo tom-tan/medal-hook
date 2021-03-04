@@ -85,6 +85,16 @@ Node applyOperation(Node base, Node op)
                                                 .array;
         base["configuration"]["env"] = Node(resultedEnv);
         return base;
+    case "replace-transition":
+        enforce(base["type"] == "network");
+        auto target = op["target"].get!string;
+        auto rng = base["transitions"].sequence
+                                      .enumerate
+                                      .find!(t => t.value["name"] == target);
+        enforce(!rng.empty, "No such transition: "~target);
+        base["transitions"][rng.front.index] = op["transition"];
+        base["transitions"][rng.front.index]["name"] = target;
+        return base;
     case "add-transitions":
         enforce(base["type"] == "network");
         if (auto trs = "transitions" in op)
@@ -182,10 +192,7 @@ Node applyOperation(Node base, Node op)
             // limitation: does not support to add them to `on` transitions
             auto rng = base["transitions"].sequence
                                           .filter!(t => t["name"] == target);
-            if (rng.empty)
-            {
-                throw new Exception("No such transition: "~target);
-            }
+            enforce(!rng.empty, "No such transition: "~target);
             auto current = rng.front["out"].sequence.array;
             auto added = op["out"].sequence.array;
             rng.front["out"] = Node(current~added);
@@ -196,10 +203,7 @@ Node applyOperation(Node base, Node op)
         auto trs = base["transitions"];
         auto rng = trs.sequence
                       .filter!(t => t["name"] == op["target"]);
-        if (rng.empty)
-        {
-            throw new Exception("No such transition: "~op["target"].get!string);
-        }
+        enforce(!rng.empty, "No such transition: "~op["target"].get!string);
         auto target = rng.front;
         target["in"] = op["in"]; // TODO: easier representation
         auto curTrs = trs.sequence.array;
