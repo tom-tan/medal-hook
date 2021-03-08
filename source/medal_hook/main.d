@@ -78,11 +78,37 @@ Node applyOperation(Node base, Node op)
     {
     case "replace-env":
         enforce(base["type"] == "network");
-        auto oldEnv = base["configuration"]["env"].sequence.array;
-        auto newEnv = op["env"].sequence.array;
-        auto resultedEnv = chain(newEnv, oldEnv).schwartzSort!(`a["name"].get!string`, "a < b", SwapStrategy.stable)
-                                                .uniq!`a["name"].get!string == b["name"].get!string`
-                                                .array;
+        auto newEnv = op["env"].sequence
+                               .map!(e => tuple(e["name"].get!string,
+                                                e["value"].get!string))
+                               .assocArray;
+        auto replacedEnv =
+            base["configuration"]["env"]
+                .sequence
+                .map!((e) {
+                    auto name = e["name"].get!string;
+                    auto oldValue = e["value"].get!string;
+                    string value;
+                    if (auto val = name in newEnv)
+                    {
+                        value = (*val).replace("~(self)", oldValue);
+                        newEnv.remove(name);
+                    }
+                    else
+                    {
+                        value = oldValue;
+                    }
+                    return tuple(name, value);
+                })
+                .assocArray;
+        auto resultedEnv = chain(newEnv.byPair, replacedEnv.byPair)
+                            .map!((p) {
+                                Node n;
+                                n.add("name", p.key);
+                                n.add("value", p.value);
+                                return n;
+                            })
+                            .array;
         base["configuration"]["env"] = Node(resultedEnv);
         return base;
     case "replace-transition":
