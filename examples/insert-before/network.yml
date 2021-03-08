@@ -2,18 +2,19 @@ name: insert-before-network
 application: hello
 type: network
 in:
-  - place: foo
-    pattern: 0
+  - place: hello
+    pattern: Hello
 out:
-  - place: foo
-    pattern: exit
+  - place: hello
+    pattern: goodbye
 transitions:
   - name: hello
     type: shell
     in:
-      - place: foo
-        pattern: 0
+      - place: hello
+        pattern: Hello
     out:
-      - place: foo
-        pattern: exit
-    command: echo "Hello, world!"
+      - place: hello
+        pattern: goodbye
+    command: |
+      echo "~(hello), world!"

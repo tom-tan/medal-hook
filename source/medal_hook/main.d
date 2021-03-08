@@ -205,7 +205,51 @@ Node applyOperation(Node base, Node op)
                       .filter!(t => t["name"] == op["target"]);
         enforce(!rng.empty, "No such transition: "~op["target"].get!string);
         auto target = rng.front;
-        target["in"] = op["in"]; // TODO: easier representation
+        auto replaceMap = op["in"].sequence
+                                  .map!(pair => tuple(pair["replaced"].get!string,
+                                                      pair["with"].get!string))
+                                  .assocArray;
+        target["in"] = Node(target["in"]
+                                .sequence
+                                .map!((p) {
+                                    Node n;
+                                    auto pl = p["place"].get!string;
+                                    n.add("place", replaceMap.get(pl, pl));
+                                    n.add("pattern", p["pattern"]);
+                                    return n;
+                                })
+                                .array);
+        static replaceRef(string s, string from, string to)
+        {
+            return s.replace(format!"~(%s)"(from), format!"~(%s)"(to));
+        }
+        if (target["type"] == "shell")
+        {
+            target["command"] = target["command"]
+                                    .get!string
+                                    .reduce!((acc, p) {
+                                        return replaceRef(acc, p.key, p.value);
+                                    })(replaceMap.byPair);
+        }
+        if (auto o_ = "out" in target)
+        {
+            target["out"] = Node(o_.sequence
+                                   .map!((p) {
+                                      Node n;
+                                      n.add("place", p["place"]);
+                                      auto pat = p["pattern"].get!string;
+                                      auto newPat =
+                                         pat.matchAll(ctRegex!`~\((.+)\)`)
+                                            .fold!((p, c) =>
+                                                replaceRef(p,
+                                                           c.hit,
+                                                           format!"~(%s)"(replaceMap[c[1]]))
+                                            )(pat);
+                                      n.add("pattern", newPat);
+                                      return n;
+                                   })
+                                   .array);
+        }
         auto curTrs = trs.sequence.array;
         auto inserted = op["transitions"].sequence.array;
         base["transitions"] = Node(curTrs~inserted);

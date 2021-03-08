@@ -5,15 +5,15 @@ hooks:
       - type: insert-before
         target: hello
         in:
-          - place: foo_
-            pattern: 0
+          - replaced: hello
+            with: hello_
         transitions:
           - name: echo-rooster
             type: shell
             in:
-              - place: foo
-                pattern: 0
+              - place: hello
+                pattern: Hello
             out:
-              - place: foo_
-                pattern: 0
+              - place: hello_
+                pattern: ~(hello)
             command: echo "cock-a-doodle-doo!"
