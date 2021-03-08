@@ -16,5 +16,7 @@ transitions:
     out:
       - place: hello
         pattern: goodbye
+      - place: bar
+        pattern: ~(hello)
     command: |
       echo "~(hello), world!"

@@ -268,8 +268,8 @@ Node applyOperation(Node base, Node op)
                                          pat.matchAll(ctRegex!`~\((.+)\)`)
                                             .fold!((p, c) =>
                                                 replaceRef(p,
-                                                           c.hit,
-                                                           format!"~(%s)"(replaceMap[c[1]]))
+                                                           c[1],
+                                                           replaceMap.get(c[1], c[1]))
                                             )(pat);
                                       n.add("pattern", newPat);
                                       return n;
