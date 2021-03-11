@@ -242,6 +242,10 @@ Node applyOperation(Node base, Node op)
                                     auto pl = p["place"].get!string;
                                     n.add("place", replaceMap.get(pl, pl));
                                     n.add("pattern", p["pattern"]);
+                                    if (target["type"] == "invocation")
+                                    {
+                                        n.add("port-to", p["port-to"]);
+                                    }
                                     return n;
                                 })
                                 .array);
