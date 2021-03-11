@@ -263,15 +263,22 @@ Node applyOperation(Node base, Node op)
                                    .map!((p) {
                                       Node n;
                                       n.add("place", p["place"]);
-                                      auto pat = p["pattern"].get!string;
-                                      auto newPat =
-                                         pat.matchAll(ctRegex!`~\((.+)\)`)
-                                            .fold!((p, c) =>
-                                                replaceRef(p,
-                                                           c[1],
-                                                           replaceMap.get(c[1], c[1]))
-                                            )(pat);
-                                      n.add("pattern", newPat);
+                                      if (target["type"] == "invocation")
+                                      {
+                                          n.add("port-to", p["port-to"]);
+                                      }
+                                      else
+                                      {
+                                          auto pat = p["pattern"].get!string;
+                                          auto newPat =
+                                             pat.matchAll(ctRegex!`~\((.+)\)`)
+                                                .fold!((p, c) =>
+                                                    replaceRef(p,
+                                                               c[1],
+                                                               replaceMap.get(c[1], c[1]))
+                                                )(pat);
+                                          n.add("pattern", newPat);
+                                      }
                                       return n;
                                    })
                                    .array);
