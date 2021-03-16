@@ -67,6 +67,15 @@ auto apply(ref Node base, Node hook)
     auto hs = hooks.sequence.filter!(h => h.edig("target").get!string == app);
     if (hs.empty) return base;
     auto h = hs.front;
+
+    auto workdir = hook.startMark.name.dirName;
+    foreach(Node cond; h.dig("precondition", []))
+    {
+        auto cmd = cond.get!string;
+        auto ls = executeShell(cmd, null, Config.none, size_t.max, workdir);
+        medalHookEnforce(ls.status == 0, format!"Precondition `%s` does not hold (status: %s)"(cmd, ls.status), cond);
+    }
+
     auto result = h.edig("operations").sequence.fold!applyOperation(base);
     if (auto ah = "applied-hooks" in result)
     {
