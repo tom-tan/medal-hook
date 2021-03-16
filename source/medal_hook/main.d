@@ -45,10 +45,18 @@ EOS".outdent[0..$-1])(args[0].baseName);
         }
     }
 
-    auto appliedNetwork = hookFiles.map!(f => Loader.fromFile(f).load).fold!apply(net);
-    auto app = appender!string;
-    dumper.dump(app, appliedNetwork);
-    writeln(app[]);
+    try
+    {
+        auto appliedNetwork = hookFiles.map!(f => Loader.fromFile(f).load).fold!apply(net);
+        auto app = appender!string;
+        dumper.dump(app, appliedNetwork);
+        writeln(app[]);
+    }
+    catch (MedalHookException e)
+    {
+        stderr.writefln("%s:%s:%s: %s", e.file, e.line, e.column, e.msg);
+        return 1;
+    }
     return 0;
 }
 
@@ -78,7 +86,7 @@ Node applyOperation(Node base, Node op)
     {
     case "replace-env":
         auto t = base.edig("type");
-        enforce(t == "network");
+        medalHookEnforce(t == "network", format!"Unsupported type: %s"(t.get!string), t);
         auto newEnv = op.edig("env").sequence
                                     .map!(e => tuple(e.edig("name").get!string,
                                                      e.edig("value").get!string))
@@ -114,18 +122,18 @@ Node applyOperation(Node base, Node op)
         return base;
     case "replace-transition":
         auto t = base.edig("type");
-        enforce(t == "network");
+        medalHookEnforce(t == "network", format!"Unsupported type: %s"(t.get!string), t);
         auto target = op.edig("target").get!string;
         auto rng = base.edig("transitions").sequence
                                            .enumerate
                                            .find!(t => t.value.edig("name") == target);
-        enforce(!rng.empty, "No such transition: "~target);
+        medalHookEnforce(!rng.empty, "No such transition: "~target, base["transitions"]);
         base["transitions"][rng.front.index] = op.edig("transition");
         base["transitions"][rng.front.index]["name"] = target;
         return base;
     case "add-transitions":
         auto t = base.edig("type");
-        enforce(t == "network");
+        medalHookEnforce(t == "network", format!"Unsupported type: %s"(t.get!string), t);
         if (auto trs = "transitions" in op)
         {
             trs.sequence.each!((t) {
@@ -180,11 +188,11 @@ Node applyOperation(Node base, Node op)
         return base;
     case "add-out":
         auto t = base.edig("type");
-        enforce(t == "network");
+        medalHookEnforce(t == "network", format!"Unsupported type: %s"(t.get!string), t);
         auto target = op.edig("target").get!string;
         if (target.isRegexPattern)
         {
-            enforce(!target.endsWith("g"));
+            medalHookEnforce(!target.endsWith("g"), "Global pattern is not supported", op["target"]);
             auto expandPattern(Node baseOp, Captures!string c)
             {
                 Node ret;
@@ -226,7 +234,7 @@ Node applyOperation(Node base, Node op)
             auto rng = base.edig("transitions")
                            .sequence
                            .filter!(t => t.edig("name") == target);
-            enforce(!rng.empty, "No such transition: "~target);
+            medalHookEnforce(!rng.empty, "No such transition: "~target, base["transitions"]);
             auto current = rng.front.dig("out", []).sequence.array;
             auto added = op.edig("out").sequence.array;
             rng.front["out"] = Node(current~added);
@@ -234,11 +242,11 @@ Node applyOperation(Node base, Node op)
         return base;
     case "insert-before":
         auto t = base.edig("type");
-        enforce(t == "network");
+        medalHookEnforce(t == "network", format!"Unsupported type: %s"(t.get!string), t);
         auto trs = base.edig("transitions");
         auto rng = trs.sequence
                       .filter!(t => t.edig("name") == op.edig("target"));
-        enforce(!rng.empty, "No such transition: "~op["target"].get!string);
+        medalHookEnforce(!rng.empty, "No such transition: "~op["target"].get!string, trs);
         auto target = rng.front;
         auto replaceMap = op.dig("in", [])
                             .sequence
@@ -310,7 +318,7 @@ Node applyOperation(Node base, Node op)
 Node[] expandTransition(Node node, Node base)
 {
     auto type = base.edig("type");
-    enforce(type == "network");
+    medalHookEnforce(type == "network", format!"Unsupported type for expand: %s"(type.get!string), type);
     if (node.edig("type") != "shell")
     {
         return [node];
@@ -326,7 +334,7 @@ Node[] expandTransition(Node node, Node base)
         auto pl = inp.edig("place").get!string;
         if (pl.isRegexPattern)
         {
-            enforce(!isExpandPattern, "Only one regex pattern is allowed");
+            medalHookEnforce(!isExpandPattern, "Only one regex pattern is allowed", inp["place"]);
             isExpandPattern = true;
             isGlobalPattern = pl.endsWith("g");
             auto end = isGlobalPattern ? pl.length-2 : pl.length-1;
@@ -411,7 +419,7 @@ Node[] expandTransition(Node node, Node base)
 auto enumerateTransitions(Node n)
 {
     auto type = n.edig("type");
-    enforce(type == "network");
+    medalHookEnforce(type == "network", format!"Unsupported type for enumerate transitions: %s"(type), type);
     return chain(n.dig("transitions",   []).sequence,
                  n.dig(["on", "success"], []).sequence,
                  n.dig(["on", "failure"], []).sequence,
@@ -521,4 +529,14 @@ class MedalHookException : Exception
     }
 
     ulong column;
+}
+
+auto medalHookEnforce(T)(lazy T exp, string msg, Node node)
+{
+    auto e = exp();
+    if (!e)
+    {
+        throw new MedalHookException(msg, node);
+    }
+    return e;
 }
