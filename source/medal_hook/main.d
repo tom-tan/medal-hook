@@ -54,40 +54,41 @@ EOS".outdent[0..$-1])(args[0].baseName);
 
 auto apply(ref Node base, Node hook)
 {
-    auto app = enforce("application" in base).get!string;
-    auto hooks = enforce("hooks" in hook);
-    auto hs = hooks.sequence.filter!(h => h["target"].get!string == app);
+    auto app = base.edig("application").get!string;
+    auto hooks = hook.edig("hooks");
+    auto hs = hooks.sequence.filter!(h => h.edig("target").get!string == app);
     if (hs.empty) return base;
     auto h = hs.front;
-    auto result = h["operations"].sequence.fold!applyOperation(base);
+    auto result = h.edig("operations").sequence.fold!applyOperation(base);
     if (auto ah = "applied-hooks" in result)
     {
-        ah.add(hook["id"]);
+        ah.add(hook.edig("id"));
     }
     else
     {
-        result.add("applied-hooks", Node([hook["id"]]));
+        result.add("applied-hooks", Node([hook.edig("id")]));
     }
     return result;
 }
 
 Node applyOperation(Node base, Node op)
 {
-    auto type = op["type"].get!string;
+    auto type = op.edig("type").get!string;
     switch(type)
     {
     case "replace-env":
-        enforce(base["type"] == "network");
-        auto newEnv = op["env"].sequence
-                               .map!(e => tuple(e["name"].get!string,
-                                                e["value"].get!string))
-                               .assocArray;
+        auto t = base.edig("type");
+        enforce(t == "network");
+        auto newEnv = op.edig("env").sequence
+                                    .map!(e => tuple(e.edig("name").get!string,
+                                                     e.edig("value").get!string))
+                                    .assocArray;
         auto replacedEnv =
-            base["configuration"]["env"]
+            base.edig(["configuration", "env"])
                 .sequence
                 .map!((e) {
-                    auto name = e["name"].get!string;
-                    auto oldValue = e["value"].get!string;
+                    auto name = e.edig("name").get!string;
+                    auto oldValue = e.edig("value").get!string;
                     string value;
                     if (auto val = name in newEnv)
                     {
@@ -112,17 +113,19 @@ Node applyOperation(Node base, Node op)
         base["configuration"]["env"] = Node(resultedEnv);
         return base;
     case "replace-transition":
-        enforce(base["type"] == "network");
-        auto target = op["target"].get!string;
-        auto rng = base["transitions"].sequence
-                                      .enumerate
-                                      .find!(t => t.value["name"] == target);
+        auto t = base.edig("type");
+        enforce(t == "network");
+        auto target = op.edig("target").get!string;
+        auto rng = base.edig("transitions").sequence
+                                           .enumerate
+                                           .find!(t => t.value.edig("name") == target);
         enforce(!rng.empty, "No such transition: "~target);
-        base["transitions"][rng.front.index] = op["transition"];
+        base["transitions"][rng.front.index] = op.edig("transition");
         base["transitions"][rng.front.index]["name"] = target;
         return base;
     case "add-transitions":
-        enforce(base["type"] == "network");
+        auto t = base.edig("type");
+        enforce(t == "network");
         if (auto trs = "transitions" in op)
         {
             trs.sequence.each!((t) {
@@ -176,8 +179,9 @@ Node applyOperation(Node base, Node op)
         }
         return base;
     case "add-out":
-        enforce(base["type"] == "network");
-        auto target = op["target"].get!string;
+        auto t = base.edig("type");
+        enforce(t == "network");
+        auto target = op.edig("target").get!string;
         if (target.isRegexPattern)
         {
             enforce(!target.endsWith("g"));
@@ -187,64 +191,70 @@ Node applyOperation(Node base, Node op)
                 ret.add("type", Node("add-out"));
                 ret["target"] = Node(c.hit);
                 auto cap = c[1];
-                ret["out"] = Node(baseOp["out"].sequence
-                                           .map!((o) {
-                                               Node newOut;
-                                               newOut.add("place", o["place"]);
-                                               newOut["port-to"] = o["port-to"].get!string.replace("~1", cap);
-                                               return newOut;
-                                           })
-                                           .array);
+                ret["out"] = Node(baseOp.edig("out")
+                                        .sequence
+                                        .map!((o) {
+                                            Node newOut;
+                                            newOut.add("place", o.edig("place"));
+                                            newOut["port-to"] = o.edig("port-to")
+                                                                 .get!string
+                                                                 .replace("~1", cap);
+                                            return newOut;
+                                        })
+                                        .array);
                 return ret;
             }
             auto re = regex(target[1..$-1]);
-            auto trs = base["transitions"].sequence;
-            foreach(t; trs.filter!(t => t["name"].get!string.matchFirst(re)))
+            auto trs = base.edig("transitions").sequence;
+            foreach(tr; trs.filter!(t => t.edig("name").get!string.matchFirst(re)))
             {
-                auto cap = t["name"].get!string.matchFirst(re);
+                auto cap = tr["name"].get!string.matchFirst(re);
                 auto expandedOp = expandPattern(op, cap);
                 base = applyOperation(base, expandedOp);
             }
         }
-        else if (base["name"] == target)
+        else if (base.edig("name") == target)
         {
-            auto current = base["out"].sequence.array;
-            auto added = op["out"].sequence.array;
+            auto current = base.dig("out", []).sequence.array;
+            auto added = op.edig("out").sequence.array;
             // TODO: should not be overwrapped
             base["out"] = Node(current~added);
         }
         else
         {
             // limitation: does not support to add them to `on` transitions
-            auto rng = base["transitions"].sequence
-                                          .filter!(t => t["name"] == target);
+            auto rng = base.edig("transitions")
+                           .sequence
+                           .filter!(t => t.edig("name") == target);
             enforce(!rng.empty, "No such transition: "~target);
-            auto current = rng.front["out"].sequence.array;
-            auto added = op["out"].sequence.array;
+            auto current = rng.front.dig("out", []).sequence.array;
+            auto added = op.edig("out").sequence.array;
             rng.front["out"] = Node(current~added);
         }
         return base;
     case "insert-before":
-        enforce(base["type"] == "network");
-        auto trs = base["transitions"];
+        auto t = base.edig("type");
+        enforce(t == "network");
+        auto trs = base.edig("transitions");
         auto rng = trs.sequence
-                      .filter!(t => t["name"] == op["target"]);
+                      .filter!(t => t.edig("name") == op.edig("target"));
         enforce(!rng.empty, "No such transition: "~op["target"].get!string);
         auto target = rng.front;
-        auto replaceMap = op["in"].sequence
-                                  .map!(pair => tuple(pair["replaced"].get!string,
-                                                      pair["with"].get!string))
-                                  .assocArray;
-        target["in"] = Node(target["in"]
+        auto replaceMap = op.dig("in", [])
+                            .sequence
+                            .map!(pair => tuple(pair.edig("replaced").get!string,
+                                                pair.edig("with").get!string))
+                            .assocArray;
+        target["in"] = Node(target.edig("in")
                                 .sequence
                                 .map!((p) {
                                     Node n;
-                                    auto pl = p["place"].get!string;
+                                    auto pl = p.edig("place").get!string;
                                     n.add("place", replaceMap.get(pl, pl));
-                                    n.add("pattern", p["pattern"]);
-                                    if (target["type"] == "invocation")
+                                    n.add("pattern", p.edig("pattern"));
+                                    if (target.edig("type") == "invocation")
                                     {
-                                        n.add("port-to", p["port-to"]);
+                                        n.add("port-to", p.edig("port-to"));
                                     }
                                     return n;
                                 })
@@ -253,9 +263,9 @@ Node applyOperation(Node base, Node op)
         {
             return s.replace(format!"~(%s)"(from), format!"~(%s)"(to));
         }
-        if (target["type"] == "shell")
+        if (target.edig("type") == "shell")
         {
-            target["command"] = target["command"]
+            target["command"] = target.edig("command")
                                     .get!string
                                     .reduce!((acc, p) {
                                         return replaceRef(acc, p.key, p.value);
@@ -266,14 +276,14 @@ Node applyOperation(Node base, Node op)
             target["out"] = Node(o_.sequence
                                    .map!((p) {
                                       Node n;
-                                      n.add("place", p["place"]);
-                                      if (target["type"] == "invocation")
+                                      n.add("place", p.edig("place"));
+                                      if (target.edig("type") == "invocation")
                                       {
-                                          n.add("port-to", p["port-to"]);
+                                          n.add("port-to", p.edig("port-to"));
                                       }
                                       else
                                       {
-                                          auto pat = p["pattern"].get!string;
+                                          auto pat = p.edig("pattern").get!string;
                                           auto newPat =
                                              pat.matchAll(ctRegex!`~\((.+)\)`)
                                                 .fold!((p, c) =>
@@ -288,7 +298,7 @@ Node applyOperation(Node base, Node op)
                                    .array);
         }
         auto curTrs = trs.sequence.array;
-        auto inserted = op["transitions"].sequence.array;
+        auto inserted = op.edig("transitions").sequence.array;
         base["transitions"] = Node(curTrs~inserted);
         return base;
     default:
@@ -299,8 +309,9 @@ Node applyOperation(Node base, Node op)
 
 Node[] expandTransition(Node node, Node base)
 {
-    enforce(base["type"] == "network");
-    if (node["type"] != "shell")
+    auto type = base.edig("type");
+    enforce(type == "network");
+    if (node.edig("type") != "shell")
     {
         return [node];
     }
@@ -310,9 +321,9 @@ Node[] expandTransition(Node node, Node base)
     auto isExpandPattern = false;
     auto isGlobalPattern = false;
     Captures!string[] caps;
-    foreach(inp; node["in"].sequence)
+    foreach(inp; node.dig("in", []).sequence)
     {
-        auto pl = inp["place"].get!string;
+        auto pl = inp.edig("place").get!string;
         if (pl.isRegexPattern)
         {
             enforce(!isExpandPattern, "Only one regex pattern is allowed");
@@ -325,7 +336,7 @@ Node[] expandTransition(Node node, Node base)
                 .each!((p) {
                     Node n;
                     n.add("place", p);
-                    n.add("pattern", inp["pattern"]);
+                    n.add("pattern", inp.edig("pattern"));
                     expandedIn ~= n;
                     caps ~= p.matchFirst(re);
                 });
@@ -342,11 +353,11 @@ Node[] expandTransition(Node node, Node base)
     }
     else if (isGlobalPattern)
     {
-        auto pls = expandedIn.map!(i => format!"~(%s)"(i["place"].get!string))
+        auto pls = expandedIn.map!(i => format!"~(%s)"(i.edig("place").get!string))
                              .array;
-        auto cmd = node["command"].get!string.replace("~@", pls.joiner(" ").array);
+        auto cmd = node.edig("command").get!string.replace("~@", pls.joiner(" ").array);
         Node ret;
-        ret.add("name", node["name"]);
+        ret.add("name", node.edig("name"));
         ret.add("type", "shell");
         ret.add("in", nonExpandedIn~expandedIn);
         if (auto o = "out" in node)
@@ -366,7 +377,7 @@ Node[] expandTransition(Node node, Node base)
             pats ~= enumerate(c[1..$], 1).map!(tpl => [format!"~%s"(tpl.index), tpl.value]).array;
 
             Node ret;
-            auto name = node["name"].get!string;
+            auto name = node.edig("name").get!string;
             pats.each!(p => name = name.replace(p[0], p[1]));
             ret.add("name", name);
 
@@ -374,7 +385,7 @@ Node[] expandTransition(Node node, Node base)
             ret.add("in", nonExpandedIn~expandedIn[idx]);
 
 
-            auto cmd = node["command"].get!string;
+            auto cmd = node.edig("command").get!string;
             pats.each!(p => cmd = cmd.replace(p[0], p[1]));
             ret.add("command", cmd);
 
@@ -382,10 +393,10 @@ Node[] expandTransition(Node node, Node base)
             {
                 auto newOut = o.sequence.map!((oo) {
                     Node out_;
-                    auto pl = oo["place"].get!string;
+                    auto pl = oo.edig("place").get!string;
                     pats.each!(p => pl = pl.replace(p[0], p[1]));
                     out_.add("place", pl);
-                    out_.add("pattern", oo["pattern"]);
+                    out_.add("pattern", oo.edig("pattern"));
                     return out_;
                 }).array;
                 ret.add("out", Node(newOut));
@@ -399,8 +410,9 @@ Node[] expandTransition(Node node, Node base)
 
 auto enumerateTransitions(Node n)
 {
-    enforce(n["type"] == "network");
-    return chain(n.dig(["transitions"],   []).sequence,
+    auto type = n.edig("type");
+    enforce(type == "network");
+    return chain(n.dig("transitions",   []).sequence,
                  n.dig(["on", "success"], []).sequence,
                  n.dig(["on", "failure"], []).sequence,
                  n.dig(["on", "exit"],    []).sequence).array;
@@ -410,24 +422,24 @@ auto enumeratePlaces(Node node)
 {
     auto places(Node n)
     {
-        if (n["type"] == "invocation")
+        if (n.edig("type") == "invocation")
         {
-            auto inp = n.dig(["in"], [])
+            auto inp = n.dig("in", [])
                         .sequence
-                        .map!(n => n["place"].get!string)
+                        .map!(n => n.edig("place").get!string)
                         .array;
-            auto outs = n.dig(["out"], [])
+            auto outs = n.dig("out", [])
                          .sequence
-                         .map!(n => n["port-to"].get!string)
+                         .map!(n => n.edig("port-to").get!string)
                          .array;
             return inp~outs;
 
         }
         else
         {
-            return chain(n.dig(["in"], []).sequence,
-                         n.dig(["out"], []).sequence)
-                    .map!(n => n["place"].get!string)
+            return chain(n.dig("in", []).sequence,
+                         n.dig("out", []).sequence)
+                    .map!(n => n.edig("place").get!string)
                     .array;
         }
     }
@@ -436,6 +448,11 @@ auto enumeratePlaces(Node node)
                     .joiner
                     .array;
     return arr.sort.uniq.array;
+}
+
+auto dig(T)(Node node, string key, T default_)
+{
+    return dig(node, [key], default_);
 }
 
 auto dig(T)(Node node, string[] keys, T default_)
@@ -463,7 +480,45 @@ auto dig(T)(Node node, string[] keys, T default_)
     return ret;
 }
 
+/// enforceDig
+auto edig(Node node, string key, string msg = "")
+{
+    return edig(node, [key], msg);
+}
+
+/// ditto
+auto edig(Node node, string[] keys, string msg = "")
+{
+    Node ret = node;
+    foreach(k_; keys)
+    {
+        auto k = k_ == "true" ? "on" : k_;
+        if (auto n = k in ret)
+        {
+            ret = *n;
+        }
+        else
+        {
+            msg = msg.empty ? format!"No such field: %s"(k_) : msg;
+            throw new MedalHookException(msg, ret);
+        }
+    }
+    return ret;
+}
+
 auto isRegexPattern(string s) @nogc nothrow pure @safe
 {
     return s.startsWith("/") && (s.endsWith("/") || s.endsWith("/g"));
+}
+
+class MedalHookException : Exception
+{
+    this(string msg, Node node) nothrow pure
+    {
+        auto mark = node.startMark;
+        super(msg, mark.name, mark.line+1);
+        this.column = mark.column+1;
+    }
+
+    ulong column;
 }
