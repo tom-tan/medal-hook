@@ -1,0 +1,23 @@
+configuration:
+  env:
+    - name: MESSAGE
+      value: Hello
+name: env-network
+application: echo-env
+type: network
+in:
+  - place: foo
+    pattern: 0
+out:
+  - place: foo
+    pattern: exit
+transitions:
+  - name: show-env
+    type: shell
+    in:
+      - place: foo
+        pattern: 0
+    out:
+      - place: foo
+        pattern: exit
+    command: echo "$MESSAGE, world!"

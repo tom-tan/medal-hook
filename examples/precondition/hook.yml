@@ -1,0 +1,10 @@
+id: example-precondition
+hooks:
+  - target: echo-env
+    precondition:
+      - ./bin/cond.sh ~(target)
+    operations:
+      - type: replace-env
+        env:
+          - name: MESSAGE
+            value: Good morning
