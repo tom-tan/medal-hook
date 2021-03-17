@@ -71,9 +71,11 @@ auto apply(ref Node base, Node hook)
     auto workdir = hook.startMark.name.dirName;
     foreach(Node cond; h.dig("precondition", []))
     {
-        auto cmd = cond.get!string;
+        auto cmd = cond.get!string.replace("~(target)", base.startMark.name.absolutePath);
         auto ls = executeShell(cmd, null, Config.none, size_t.max, workdir);
-        medalHookEnforce(ls.status == 0, format!"Precondition `%s` does not hold (status: %s)"(cmd, ls.status), cond);
+        medalHookEnforce(ls.status == 0,
+                         format!"Precondition `%s` does not hold (status: %s, output: `%s`)"(cmd, ls.status, ls.output),
+                         cond);
     }
 
     auto result = h.edig("operations").sequence.fold!applyOperation(base);
@@ -529,6 +531,18 @@ auto isRegexPattern(string s) @nogc nothrow pure @safe
 }
 
 class MedalHookException : Exception
+{
+    this(string msg, Node node) nothrow pure
+    {
+        auto mark = node.startMark;
+        super(msg, mark.name, mark.line+1);
+        this.column = mark.column+1;
+    }
+
+    ulong column;
+}
+
+class PreconditionDoesNotHold : Exception
 {
     this(string msg, Node node) nothrow pure
     {
