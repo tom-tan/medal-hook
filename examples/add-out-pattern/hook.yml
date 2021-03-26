@@ -5,5 +5,5 @@ hooks:
       - type: add-out
         target: "/^hello(.+)$/"
         out:
-          - place: bar
-            port-to: "bar~1"
+          - place: "bar~1"
+            pattern: ~(tr.bar)

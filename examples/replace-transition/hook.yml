@@ -9,7 +9,9 @@ hooks:
           in:
             - place: foo
               pattern: 0
+            - place: file
+              pattern: _
           out:
             - place: foo
               pattern: exit
-          command: echo "Good night, world!"
+          command: echo "Good night, world!" > ~(in.file)

@@ -10,4 +10,6 @@ hooks:
               in:
                 - place: bar
                   pattern: _
-              command: echo "Good night, world!"
+                - place: out
+                  pattern: _
+              command: echo "Good night, world!" >> ~(in.out)

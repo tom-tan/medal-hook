@@ -9,6 +9,8 @@ out:
     pattern: exit
   - place: bar
     pattern: exit
+  - place: out
+    pattern: _
 transitions:
   - name: hello
     type: shell
@@ -20,4 +22,6 @@ transitions:
         pattern: exit
       - place: bar
         pattern: exit
-    command: echo "Hello, world!"
+      - place: out
+        pattern: actual.txt
+    command: echo "Hello, world!" > actual.txt

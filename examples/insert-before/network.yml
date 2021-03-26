@@ -4,6 +4,8 @@ type: network
 in:
   - place: hello
     pattern: Hello
+  - place: file
+    pattern: _
 out:
   - place: hello
     pattern: goodbye
@@ -13,10 +15,14 @@ transitions:
     in:
       - place: hello
         pattern: Hello
+      - place: file
+        pattern: _
     out:
       - place: hello
         pattern: goodbye
       - place: bar
-        pattern: ~(hello)
+        pattern: ~(in.hello)
+      - place: file
+        pattern: ~(in.file)
     command: |
-      echo "~(hello), world!"
+      echo "~(in.hello), world!" >> ~(in.file)

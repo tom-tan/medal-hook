@@ -7,13 +7,19 @@ hooks:
         in:
           - replaced: hello
             with: hello_
+          - replaced: file
+            with: file_
         transitions:
           - name: echo-rooster
             type: shell
             in:
               - place: hello
                 pattern: Hello
+              - place: file
+                pattern: _
             out:
               - place: hello_
-                pattern: ~(hello)
-            command: echo "cock-a-doodle-doo!"
+                pattern: ~(in.hello)
+              - place: file_
+                pattern: ~(in.file)
+            command: echo "cock-a-doodle-doo!" >> ~(in.file)

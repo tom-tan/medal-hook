@@ -25,7 +25,7 @@ do
         mv $ex/network-hooked1.yml $ex/network-hooked.yml
     fi
 
-    medal $ex/network-hooked.yml -i $ex/init.yml --workdir=$ex --quiet > $ex/actual.txt
+    medal $ex/network-hooked.yml -i $ex/init.yml --workdir=$ex --quiet
     if [ $? -ne 0 ]; then
         echo "execution failed: $ex"
         code=1

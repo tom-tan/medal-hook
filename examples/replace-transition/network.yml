@@ -4,6 +4,8 @@ type: network
 in:
   - place: foo
     pattern: 0
+  - place: file
+    pattern: _
 out:
   - place: foo
     pattern: exit
@@ -13,7 +15,9 @@ transitions:
     in:
       - place: foo
         pattern: 0
+      - place: file
+        pattern: _
     out:
       - place: foo
         pattern: exit
-    command: echo "Hello, world!"
+    command: echo "Hello, world!" > ~(in.file)

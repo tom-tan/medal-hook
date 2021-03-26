@@ -214,10 +214,10 @@ Node applyOperation(Node base, Node op)
                                         .sequence
                                         .map!((o) {
                                             Node newOut;
-                                            newOut.add("place", o.edig("place"));
-                                            newOut["port-to"] = o.edig("port-to")
+                                            newOut.add("place", o.edig("place")
                                                                  .get!string
-                                                                 .replace("~1", cap);
+                                                                 .replace("~1", cap));
+                                            newOut.add("pattern", o.edig("pattern"));
                                             return newOut;
                                         })
                                         .array);
@@ -280,7 +280,7 @@ Node applyOperation(Node base, Node op)
                                 .array);
         static replaceRef(string s, string from, string to)
         {
-            return s.replace(format!"~(%s)"(from), format!"~(%s)"(to));
+            return s.replace(format!"~(in.%s)"(from), format!"~(in.%s)"(to));
         }
         if (target.edig("type") == "shell")
         {
@@ -296,22 +296,15 @@ Node applyOperation(Node base, Node op)
                                    .map!((p) {
                                       Node n;
                                       n.add("place", p.edig("place"));
-                                      if (target.edig("type") == "invocation")
-                                      {
-                                          n.add("port-to", p.edig("port-to"));
-                                      }
-                                      else
-                                      {
-                                          auto pat = p.edig("pattern").get!string;
-                                          auto newPat =
-                                             pat.matchAll(ctRegex!`~\((.+)\)`)
-                                                .fold!((p, c) =>
-                                                    replaceRef(p,
-                                                               c[1],
-                                                               replaceMap.get(c[1], c[1]))
-                                                )(pat);
-                                          n.add("pattern", newPat);
-                                      }
+                                      auto pat = p.edig("pattern").get!string;
+                                      auto newPat =
+                                         pat.matchAll(ctRegex!`~\(in\.(.+)\)`)
+                                            .fold!((p, c) =>
+                                                replaceRef(p,
+                                                           c[1],
+                                                           replaceMap.get(c[1], c[1]))
+                                            )(pat);
+                                      n.add("pattern", newPat);
                                       return n;
                                    })
                                    .array);
@@ -441,26 +434,10 @@ auto enumeratePlaces(Node node)
 {
     auto places(Node n)
     {
-        if (n.edig("type") == "invocation")
-        {
-            auto inp = n.dig("in", [])
-                        .sequence
-                        .map!(n => n.edig("place").get!string)
-                        .array;
-            auto outs = n.dig("out", [])
-                         .sequence
-                         .map!(n => n.edig("port-to").get!string)
-                         .array;
-            return inp~outs;
-
-        }
-        else
-        {
-            return chain(n.dig("in", []).sequence,
-                         n.dig("out", []).sequence)
-                    .map!(n => n.edig("place").get!string)
-                    .array;
-        }
+        return chain(n.dig("in", []).sequence,
+                     n.dig("out", []).sequence)
+                .map!(n => n.edig("place").get!string)
+                .array;
     }
     auto arr =  enumerateTransitions(node)
                     .map!(n => places(n))

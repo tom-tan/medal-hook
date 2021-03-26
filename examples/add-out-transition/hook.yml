@@ -13,4 +13,4 @@ hooks:
         target: hello
         out:
           - place: bar
-            port-to: bar
+            pattern: ~(tr.bar)

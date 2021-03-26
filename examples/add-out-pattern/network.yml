@@ -14,7 +14,9 @@ on:
       in:
         - place: bar0
           pattern: exit
-      command: echo "Good night, world!"
+        - place: out
+          pattern: _
+      command: echo "Good night, world!" >> ~(in.out)
 transitions:
   - name: hello0
     type: invocation
@@ -24,5 +26,7 @@ transitions:
         port-to: foo
     out:
       - place: foo
-        port-to: foo
+        pattern: ~(tr.foo)
+      - place: out
+        pattern: ~(tr.out)
     use: subnetwork.yml
