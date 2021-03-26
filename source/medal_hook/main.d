@@ -365,7 +365,7 @@ Node[] expandTransition(Node node, Node base)
     }
     else if (isGlobalPattern)
     {
-        auto pls = expandedIn.map!(i => format!"~(%s)"(i.edig("place").get!string))
+        auto pls = expandedIn.map!(i => format!"~(in.%s)"(i.edig("place").get!string))
                              .array;
         auto cmd = node.edig("command").get!string.replace("~@", pls.joiner(" ").array);
         Node ret;
@@ -385,7 +385,7 @@ Node[] expandTransition(Node node, Node base)
         foreach(idx; iota(expandedIn.length))
         {
             auto c = caps[idx].array;
-            auto pats = [["~0", format!"~(%s)"(c[0])]];
+            auto pats = [["~0", format!"~(in.%s)"(c[0])]];
             pats ~= enumerate(c[1..$], 1).map!(tpl => [format!"~%s"(tpl.index), tpl.value]).array;
 
             Node ret;
