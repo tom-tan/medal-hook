@@ -18,6 +18,10 @@
 		"release-static": {
 			"buildOptions": ["releaseMode", "optimize", "inline"],
 			"dflags-posix-ldc": ["-static"]
+		},
+		"unittest": {
+			"buildOptions": ["unittests", "debugMode", "debugInfo"],
+			"dflags": ["-checkaction=context"]
 		}
 	}
 }
