@@ -92,6 +92,8 @@ auto apply(ref Node base, Node hook)
 
 Node applyOperation(Node base, Node op)
 {
+    auto expand = (Node n) => n.expandTransition(base);
+
     auto type = op.edig("type").get!string;
     switch(type)
     {
@@ -135,66 +137,80 @@ Node applyOperation(Node base, Node op)
         auto t = base.edig("type");
         medalHookEnforce(t == "network", format!"Unsupported type: %s"(t.get!string), t);
         auto target = op.edig("target").get!string;
-        auto rng = base.edig("transitions").sequence
-                                           .enumerate
-                                           .find!(t => t.value.edig("name") == target);
-        medalHookEnforce(!rng.empty, "No such transition: "~target, base["transitions"]);
-        base["transitions"][rng.front.index] = op.edig("transition");
-        base["transitions"][rng.front.index]["name"] = target;
-        return base;
+        foreach(ts; [base.dig("transitions",   []),
+                     base.dig(["on", "success"], []),
+                     base.dig(["on", "failure"], []),
+                     base.dig(["on", "exit"],    [])])
+        {
+            auto rng = ts.sequence.enumerate.find!(t => t.value.edig("name") == target);
+            if (rng.empty)
+            {
+                continue;
+            }
+            ts[rng.front.index] = op.edig("transition");
+            ts[rng.front.index]["name"] = target;
+            return base;
+        }
+        assert(false);
     case "add-transitions":
         auto t = base.edig("type");
         medalHookEnforce(t == "network", format!"Unsupported type: %s"(t.get!string), t);
-        if (auto trs = "transitions" in op)
+
+        Node toBeMerged;
+        toBeMerged.add("transitions", op.dig("transitions", []).sequence.map!expand.joiner.array);
+
+        if (auto opOn = true in op) // "on" is parsed as the true value :-(
         {
-            trs.sequence.each!((t) {
-                if ("transitions" !in base)
-                {
-                    base["transitions"] = Node((Node[]).init);
-                }
-                t.expandTransition(base).each!(tt => base["transitions"].add(tt));
-            });
+            Node on;
+            on.add("exit", (*opOn).dig("exit", []).sequence.map!expand.joiner.array);
+            on.add("success", (*opOn).dig("success", []).sequence.map!expand.joiner.array);
+            on.add("failure", (*opOn).dig("failure", []).sequence.map!expand.joiner.array);
+            toBeMerged.add(true, on);
         }
-        if (auto on = true in op)
+
+        base.merge(toBeMerged);
+
+        return base;
+    case "add-in":
+        auto t = base.edig("type");
+        medalHookEnforce(t == "network", format!"Unsupported type: %s"(t.get!string), t);
+        auto target = op.edig("target").get!string;
+        if (target.isRegexPattern)
         {
-            if (auto bon_ = true in base)
+            medalHookEnforce(!target.endsWith("g"), "Global pattern is not supported", op["target"]);
+            auto expandInPattern(Node baseOp, Captures!string c)
             {
-                auto bon = *bon_;
-                if (auto suc = "success" in *on)
-                {
-                    suc.sequence.each!((t) {
-                        if ("success" !in bon)
-                        {
-                            bon["success"] = Node((Node[]).init);
-                        }
-                        t.expandTransition(base).each!(tt => bon["success"].add(tt));
-                    });
-                }
-                if (auto fail = "failure" in *on)
-                {
-                    fail.sequence.each!((t) {
-                        if ("failure" !in bon)
-                        {
-                            bon["failure"] = Node((Node[]).init);
-                        }
-                        t.expandTransition(base).each!(tt => bon["failure"].add(tt));
-                    });
-                }
-                if (auto ex = "exit" in *on)
-                {
-                    ex.sequence.each!((t) {
-                        if ("exit" !in bon)
-                        {
-                            bon["exit"] = Node((Node[]).init);
-                        }
-                        t.expandTransition(base).each!(tt => bon["exit"].add(tt));
-                    });
-                }
+                Node ret;
+                ret.add("type", "add-in");
+                ret.add("target", c.hit);
+                auto caps = c.enumerate
+                             .map!(vi => tuple(format!"~%s"(vi.index), vi.value));
+                auto outs = baseOp.edig("in")
+                                  .visitRecurse((k, v) =>
+                                    // TODO: place should not be regex pattern
+                                    k == "place" ? v.reduce!"a.replace(b.expand)"(caps)
+                                                 : v
+                                  );
+                ret.add("in", outs);
+                return ret;
             }
-            else
+            auto re = regex(target[1..$-1]);
+            auto trs = base.edig("transitions").sequence;
+            foreach(tr; trs.filter!(t => t.edig("name").get!string.matchFirst(re)))
             {
-                base[true] = *on;
+                auto cap = tr["name"].get!string.matchFirst(re);
+                auto expandedOp = expandInPattern(op, cap);
+                base = applyOperation(base, expandedOp);
             }
+        }
+        else
+        {
+            auto rng = enumerateTransitions(base).find!(t => t.edig("name") == target);
+            medalHookEnforce(!rng.empty, "No such transition: "~target, base);
+            auto current = rng.front.dig("in", []).sequence.array;
+            auto added = op.edig("in").sequence.array;
+            // TODO: should not be overwrapped
+            rng.front["in"] = Node(current~added);
         }
         return base;
     case "add-out":
@@ -204,50 +220,40 @@ Node applyOperation(Node base, Node op)
         if (target.isRegexPattern)
         {
             medalHookEnforce(!target.endsWith("g"), "Global pattern is not supported", op["target"]);
-            auto expandPattern(Node baseOp, Captures!string c)
+            auto expandOutPattern(Node baseOp, Captures!string c)
             {
                 Node ret;
-                ret.add("type", Node("add-out"));
-                ret["target"] = Node(c.hit);
-                auto cap = c[1];
-                ret["out"] = Node(baseOp.edig("out")
-                                        .sequence
-                                        .map!((o) {
-                                            Node newOut;
-                                            newOut.add("place", o.edig("place")
-                                                                 .get!string
-                                                                 .replace("~1", cap));
-                                            newOut.add("pattern", o.edig("pattern"));
-                                            return newOut;
-                                        })
-                                        .array);
+                ret.add("type", "add-out");
+                ret.add("target", c.hit);
+                auto caps = c.enumerate
+                             .map!(vi => tuple(format!"~%s"(vi.index), vi.value));
+                auto outs = baseOp.edig("out")
+                                  .visitRecurse((k, v) =>
+                                    k == "place" ? v.reduce!"a.replace(b.expand)"(caps)
+                                                 : v
+                                  );
+                ret.add("out", outs);
                 return ret;
             }
             auto re = regex(target[1..$-1]);
-            auto trs = base.edig("transitions").sequence;
-            foreach(tr; trs.filter!(t => t.edig("name").get!string.matchFirst(re)))
+            foreach(tr; base.edig("transitions")
+                            .sequence
+                            .filter!(t => t.edig("name")
+                                           .get!string
+                                           .matchFirst(re)))
             {
                 auto cap = tr["name"].get!string.matchFirst(re);
-                auto expandedOp = expandPattern(op, cap);
+                auto expandedOp = expandOutPattern(op, cap);
                 base = applyOperation(base, expandedOp);
             }
         }
-        else if (base.edig("name") == target)
-        {
-            auto current = base.dig("out", []).sequence.array;
-            auto added = op.edig("out").sequence.array;
-            // TODO: should not be overwrapped
-            base["out"] = Node(current~added);
-        }
         else
         {
-            // limitation: does not support to add them to `on` transitions
-            auto rng = base.edig("transitions")
-                           .sequence
-                           .filter!(t => t.edig("name") == target);
-            medalHookEnforce(!rng.empty, "No such transition: "~target, base["transitions"]);
+            auto rng = enumerateTransitions(base).find!(t => t.edig("name") == target);
+            medalHookEnforce(!rng.empty, "No such transition: "~target, base);
             auto current = rng.front.dig("out", []).sequence.array;
             auto added = op.edig("out").sequence.array;
+            // TODO: should not be overwrapped
             rng.front["out"] = Node(current~added);
         }
         return base;
@@ -309,14 +315,26 @@ Node applyOperation(Node base, Node op)
                                    })
                                    .array);
         }
+
         auto curTrs = trs.sequence.array;
-        auto inserted = op.edig("transitions").sequence.array;
+        auto inserted = op.edig("transitions")
+                          .sequence
+                          .map!expand
+                          .joiner
+                          .array;
         base["transitions"] = Node(curTrs~inserted);
         return base;
     default:
         throw new Exception("Unsupported hook type: "~type);
     }
     assert(false);
+}
+
+void addParam(ref Node base, Node op, string prop)
+{
+    auto cur = base.dig(prop, []).sequence.array;
+    auto added = op.edig(prop).sequence.array;
+    base[prop] = Node(cur~added);
 }
 
 Node[] expandTransition(Node node, Node base)
@@ -361,7 +379,7 @@ Node[] expandTransition(Node node, Node base)
 
     if (!isExpandPattern)
     {
-        return [node];
+        return [node.outExpandTransition(base)];
     }
     else if (isGlobalPattern)
     {
@@ -377,7 +395,7 @@ Node[] expandTransition(Node node, Node base)
             ret.add("out", *o);
         }
         ret.add("command", cmd);
-        return [ret];
+        return [ret.outExpandTransition(base)];
     }
     else
     {
@@ -413,21 +431,75 @@ Node[] expandTransition(Node node, Node base)
                 }).array;
                 ret.add("out", Node(newOut));
             }
-            results ~= ret;
+            results ~= ret.outExpandTransition(base);
         }
         return results;
     }
     assert(false);
 }
 
+auto outExpandTransition(Node node, Node base)
+{
+    auto newOut = node.dig("out", [])
+                      .sequence
+                      .map!((o) {
+                          auto pl = o.edig("place").get!string;
+                          if (pl.isRegexPattern)
+                          {
+                            medalHookEnforce(!pl.endsWith("g"),
+                                             "Global pattern is not supported",
+                                             o.edig("place"));
+                            auto re = regex(pl[1..$-1]);
+                            return enumeratePlaces(base).filter!(p => p.matchFirst(re))
+                                                        .map!((p) {
+                                                            return Node([
+                                                                "place": p,
+                                                                "pattern": o.edig("pattern")
+                                                                            .get!string,
+                                                            ]);
+                                                        })
+                                                        .array;
+                          }
+                          else
+                          {
+                              return [o];
+                          }
+                      })
+                      .joiner
+                      .array;
+    Node ret;
+    foreach(Node k, Node v; node)
+    {
+        if (k == "out")
+        {
+            ret.add("out", newOut);
+        }
+        else if (k.type == NodeType.string)
+        {
+            ret.add(k.get!string, v);
+        }
+        else
+        {
+            ret.add(k.get!bool, v);
+        }
+    }
+    return ret;
+}
+
 auto enumerateTransitions(Node n)
 {
-    auto type = n.edig("type");
-    medalHookEnforce(type == "network", format!"Unsupported type for enumerate transitions: %s"(type), type);
-    return chain(n.dig("transitions",   []).sequence,
-                 n.dig(["on", "success"], []).sequence,
-                 n.dig(["on", "failure"], []).sequence,
-                 n.dig(["on", "exit"],    []).sequence).array;
+    if (n.edig("type") == "network")
+    {
+        return chain([n],
+                     n.dig("transitions",   []).sequence,
+                     n.dig(["on", "success"], []).sequence,
+                     n.dig(["on", "failure"], []).sequence,
+                     n.dig(["on", "exit"],    []).sequence).array;
+    }
+    else
+    {
+        return [n];
+    }
 }
 
 auto enumeratePlaces(Node node)
@@ -446,11 +518,13 @@ auto enumeratePlaces(Node node)
     return arr.sort.uniq.array;
 }
 
+/// dig
 auto dig(T)(Node node, string key, T default_)
 {
     return dig(node, [key], default_);
 }
 
+/// ditto
 auto dig(T)(Node node, string[] keys, T default_)
 {
     Node ret = node;
@@ -502,6 +576,233 @@ auto edig(Node node, string[] keys, string msg = "")
     return ret;
 }
 
+///
+Node visitRecurse(Node node, string delegate(string key, string value) fun)
+{
+    switch(node.type)
+    {
+    case NodeType.sequence:
+        return Node(node.sequence
+                        .map!(n => n.visitRecurse(fun))
+                        .array);
+    case NodeType.mapping:
+        Node ret;
+        void add(ref Node n, Node k, Node v)
+        {
+            if (k.type == NodeType.string)
+            {
+                n.add(k.get!string, v);
+            }
+            else if (k.type == NodeType.boolean)
+            {
+                n.add(k.get!bool, v);
+            }
+            else
+            {
+                throw new MedalHookException(format!"Invalid key type: %s"(k.type), k);
+            }
+        }
+
+        foreach(Node k_, Node v; node)
+        {
+            if (v.type == NodeType.string)
+            {
+                add(ret, k_, Node(fun(k_.get!string, v.get!string)));
+            }
+            else
+            {
+                add(ret, k_, v.visitRecurse(fun));
+            }
+        }
+        return ret;
+    default:
+        return node;
+    }
+}
+
+unittest
+{
+    auto orig = Node([
+        "name": Node("nn"),
+        "in": Node([
+            Node([
+                "place": "pl1-~0",
+                "pattern": "xx",
+            ]),
+            Node([
+                "place": "pl2-~0",
+                "pattern": "yy",
+            ]),
+        ]),
+        "command": Node("true"),
+    ]);
+
+    auto visited = orig.visitRecurse((k, v) {
+        return k == "place" ? v.replace("~0", "replaced")
+                            : v;
+    });
+
+    auto expected = Node([
+        "name": Node("nn"),
+        "in": Node([
+            Node([
+                "place": "pl1-replaced",
+                "pattern": "xx",
+            ]),
+            Node([
+                "place": "pl2-replaced",
+                "pattern": "yy",
+            ]),
+        ]),
+        "command": Node("true"),
+    ]);
+
+    assert(visited == expected, format!"Expected: %s\nbut actual: %s"(expected.prettyStr, visited.prettyStr));
+}
+
+void merge(ref Node base, Node extra)
+in(base.type == extra.type)
+{
+    switch(base.type)
+    {
+    case NodeType.sequence:
+        foreach(Node e; extra)
+        {
+            base.add(e);
+        }
+        break;
+    case NodeType.mapping:
+        foreach(Node k, Node v; extra)
+        {
+            void merge_(T)(T t)
+            {
+                if (t in base)
+                {
+                    base[t].merge(v);
+                }
+                else
+                {
+                    base[t] = v;
+                }
+            }
+            if (k.type == NodeType.string)
+            {
+                merge_(k.get!string);
+            }
+            else if (k.type == NodeType.boolean)
+            {
+                merge_(k.get!bool);
+            }
+            else
+            {
+                throw new MedalHookException(format!"Invalid key type: %s"(k.type), k);
+            }
+        }
+        break;
+    default:
+        throw new MedalHookException(format!"Cannot merge scalar values: %s and %s"(base.get!string, extra.get!string),
+                                     base);
+    }
+}
+
+unittest
+{
+    auto orig = Node([
+        "command": Node("true"),
+    ]);
+
+    auto extra = Node([
+        "out": Node([
+            Node([
+                "place": "output",
+                "pattern": "~(tr.stdout)",
+            ]),
+        ]),
+    ]);
+
+    orig.merge(extra);
+
+    assert(orig == Node([
+        "command": Node("true"),
+        "out": Node([
+            Node([
+                "place": "output",
+                "pattern": "~(tr.stdout)",
+            ]),
+        ]),
+    ]));
+}
+
+unittest
+{
+    auto orig = Node([
+        "out": Node([
+            Node([
+                "place": "code",
+                "pattern": "~(tr.return)",
+            ]),
+        ]),
+    ]);
+
+    auto extra = Node([
+        "out": Node([
+            Node([
+                "place": "output",
+                "pattern": "~(tr.stdout)",
+            ]),
+        ]),
+    ]);
+
+    orig.merge(extra);
+
+    auto expected = Node([
+        "out": Node([
+            Node([
+                "place": "code",
+                "pattern": "~(tr.return)",
+            ]),
+            Node([
+                "place": "output",
+                "pattern": "~(tr.stdout)",
+            ]),
+        ]),
+    ]);
+
+    assert(orig == expected,
+           format!"Expected: %s\nbut actual: %s"(expected.prettyStr, orig.prettyStr));
+}
+
+unittest
+{
+    auto orig = Node([
+        "command": Node("true"),
+    ]);
+
+    auto extra = Node([
+        Node(true): Node([
+            Node([
+                "place": "output",
+                "pattern": "~(tr.stdout)",
+            ]),
+        ]),
+    ]);
+
+    orig.merge(extra);
+
+    auto expected = Node([
+        Node("command"): Node("true"),
+        Node(true): Node([
+            Node([
+                "place": "output",
+                "pattern": "~(tr.stdout)",
+            ]),
+        ]),
+    ]);
+
+    assert(orig == expected,
+           format!"Expected: %s\nbut actual: %s"(expected.prettyStr, orig.prettyStr));
+}
+
 auto isRegexPattern(string s) @nogc nothrow pure @safe
 {
     return s.startsWith("/") && (s.endsWith("/") || s.endsWith("/g"));
@@ -539,4 +840,11 @@ auto medalHookEnforce(T)(lazy T exp, string msg, Node node)
         throw new MedalHookException(msg, node);
     }
     return e;
+}
+
+string prettyStr(Node n)
+{
+    auto app = appender!string;
+    dumper.dump(app, n);
+    return app[].to!string;
 }
