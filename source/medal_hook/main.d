@@ -185,13 +185,13 @@ Node applyOperation(Node base, Node op)
                 ret.add("target", c.hit);
                 auto caps = c.enumerate
                              .map!(vi => tuple(format!"~%s"(vi.index), vi.value));
-                auto outs = baseOp.edig("in")
+                auto ins = baseOp.edig("in")
                                   .visitRecurse((k, v) =>
                                     // TODO: place should not be regex pattern
                                     k == "place" ? v.reduce!"a.replace(b.expand)"(caps)
                                                  : v
                                   );
-                ret.add("in", outs);
+                ret.add("in", ins);
                 return ret;
             }
             auto re = regex(target[1..$-1]);
