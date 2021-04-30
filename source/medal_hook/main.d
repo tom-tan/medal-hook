@@ -64,6 +64,12 @@ auto apply(ref Node base, Node hook)
 {
     auto app = base.edig("application").get!string;
     auto hooks = hook.edig("hooks");
+    auto hookID = hook.edig("id");
+    if (base.dig("applied-hooks", []).sequence.canFind(hookID))
+    {
+        return base;
+    }
+
     auto hs = hooks.sequence.filter!(h => h.edig("target").get!string == app);
     if (hs.empty) return base;
     auto h = hs.front;
@@ -81,11 +87,11 @@ auto apply(ref Node base, Node hook)
     auto result = h.edig("operations").sequence.fold!applyOperation(base);
     if (auto ah = "applied-hooks" in result)
     {
-        ah.add(hook.edig("id"));
+        ah.add(hookID);
     }
     else
     {
-        result.add("applied-hooks", Node([hook.edig("id")]));
+        result.add("applied-hooks", Node([hookID]));
     }
     return result;
 }
@@ -151,7 +157,7 @@ Node applyOperation(Node base, Node op)
             ts[rng.front.index]["name"] = target;
             return base;
         }
-        assert(false);
+        throw new MedalHookException(format!"No such transitions: %s"(target), op.edig("target"));
     case "add-transitions":
         auto t = base.edig("type");
         medalHookEnforce(t == "network", format!"Unsupported type: %s"(t.get!string), t);
