@@ -80,7 +80,7 @@ auto apply(ref Node base, Node hook)
         auto cmd = cond.get!string.replace("~(target)", base.startMark.name.absolutePath);
         auto ls = executeShell(cmd, null, Config.none, size_t.max, workdir);
         medalHookEnforce(ls.status == 0,
-                         format!"Precondition `%s` does not hold (status: %s, output: `%s`)"(cmd, ls.status, ls.output),
+                         format!"Precondition `%s` does not hold (status: %s, output: `%s`)"(cmd, ls.status, ls.output.chomp.replace("\n", `\n`)),
                          cond);
     }
 
